@@ -226,10 +226,10 @@ def train_rl_agent_epoch(navirag: NaviRAG, training_data: List[Dict], epoch_num:
 
 def main():
     parser = argparse.ArgumentParser(description="Train NaviRAG RL Agent")
-    parser.add_argument('--dataset', type=str, default='2wikimultihopqa', help='Dataset name for training')
+     parser.add_argument('--dataset', type=str, default='2wikimultihopqa', help='Dataset name for evaluation')
     parser.add_argument('--llm_base_url', type=str, default='https://api.openai.com/v1', help='LLM base URL')
-    parser.add_argument('--llm_name', type=str, default='meta/llama-3.3-70b-instruct', help='LLM name')
-    parser.add_argument('--embedding_name', type=str, default='BAAI/bge-m3 ', help='Embedding model name')
+    parser.add_argument('--llm_name', type=str, default='meta/llama-4-maverick-17b-128e-instruct', help='LLM name')
+    parser.add_argument('--embedding_name', type=str, default='Qwen/Qwen3-Embedding-4B ', help='Embedding model name')
     parser.add_argument('--force_index_from_scratch', type=str, default='false', help='Force re-indexing')
     parser.add_argument('--epochs', type=int, default=30, help='Number of epochs for RL training')
     parser.add_argument('--save_dir', type=str, default='outputs', help='Save directory for index, models, and data splits')
