@@ -2,7 +2,7 @@
 
 **NaviRAG** is an advanced Retrieval-Augmented Generation (RAG) framework designed to tackle complex multi-hop reasoning tasks. By constructing a knowledge graph from your corpus and employing a Reinforcement Learning (RL) agent, NaviRAG learns to "navigate" from a query to the correct supporting documents, outperforming traditional dense retrieval methods.
 
-![The framework of NaviRAG](./figures/framework.png)
+![The framework of NaviRAG](./figures/framework.jpg)
 
 
 ### ✨ Key Features
