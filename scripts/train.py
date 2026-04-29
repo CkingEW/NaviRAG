@@ -8,13 +8,20 @@ from typing import List, Dict, Tuple
 from tqdm import tqdm
 import torch
 import sys
+from pathlib import Path
 
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-# Import from navirag module
 from navirag.NaviRAG import NaviRAG
 from navirag.utils.config_utils import BaseConfig
 from navirag.utils.misc_utils import string_to_bool, compute_mdhash_id
+
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -189,7 +196,7 @@ def train_rl_agent_epoch(navirag: NaviRAG, training_data: List[Dict], epoch_num:
         
         # --- Get Seed Nodes ---
         query_fact_scores = navirag.get_fact_scores(query)
-        _, top_k_facts, _ = navirag.rerank_facts(query, query_fact_scores)
+        _, top_k_facts = navirag.rank_facts(query, query_fact_scores)
         seed_nodes = set()
         for fact in top_k_facts:
             for entity in [fact[0], fact[2]]:
@@ -226,7 +233,7 @@ def train_rl_agent_epoch(navirag: NaviRAG, training_data: List[Dict], epoch_num:
 
 def main():
     parser = argparse.ArgumentParser(description="Train NaviRAG RL Agent")
-     parser.add_argument('--dataset', type=str, default='2wikimultihopqa', help='Dataset name for evaluation')
+    parser.add_argument('--dataset', type=str, default='2wikimultihopqa', help='Dataset name for evaluation')
     parser.add_argument('--llm_base_url', type=str, default='https://api.openai.com/v1', help='LLM base URL')
     parser.add_argument('--llm_name', type=str, default='meta/llama-4-maverick-17b-128e-instruct', help='LLM name')
     parser.add_argument('--embedding_name', type=str, default='Qwen/Qwen3-Embedding-4B ', help='Embedding model name')

@@ -4,7 +4,11 @@ import argparse
 import logging
 from typing import List, Set, Union, Any
 import sys
+from pathlib import Path
 
+
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 

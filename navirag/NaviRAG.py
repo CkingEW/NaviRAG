@@ -431,8 +431,6 @@ class NaviRAG:
 
         self.openie_results_path = os.path.join(self.global_config.save_dir,f'openie_results_ner_{self.global_config.llm_name.replace("/", "_")}.json')
 
-        self.rerank_filter = DSPyFilter(self)
-
         self.ready_to_retrieve = False
 
         self.ppr_time = 0
@@ -791,93 +789,93 @@ class NaviRAG:
         
         return node_weights, ppr_scores_dict
 
-def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: List[List[str]] = None) -> Union[List[QuerySolution], Tuple[List[QuerySolution], Dict]]:
-        """
-        Retrieves relevant passages for a set of queries using strictly the 'rl_rerank' mode.
-        """
-        # Always load the RL agent since we are strictly in rl_rerank mode
-        if self.rl_agent is None:
-            self.load_rl_agent(training=False)
-
-        if num_to_retrieve is None: num_to_retrieve = self.global_config.retrieval_top_k
-        if gold_docs is not None: retrieval_recall_evaluator = RetrievalRecall(global_config=self.global_config)
-        if not self.ready_to_retrieve: self.prepare_retrieval_objects()
-
-        self.precompute_embeddings(queries)
-        
-        retrieve_start_time = time.time()
-        retrieval_results = []
-        desc = "Retrieving with NaviRAG"
-
-        for q_idx, query in tqdm(enumerate(queries), desc=desc, total=len(queries)):
-                
-            query_fact_scores = self.get_fact_scores(query)
+    def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: List[List[str]] = None) -> Union[List[QuerySolution], Tuple[List[QuerySolution], Dict]]:
+            """
+            Retrieves relevant passages for a set of queries using strictly the 'rl_rerank' mode.
+            """
+            # Always load the RL agent since we are strictly in rl_rerank mode
+            if self.rl_agent is None:
+                self.load_rl_agent(training=False)
+    
+            if num_to_retrieve is None: num_to_retrieve = self.global_config.retrieval_top_k
+            if gold_docs is not None: retrieval_recall_evaluator = RetrievalRecall(global_config=self.global_config)
+            if not self.ready_to_retrieve: self.prepare_retrieval_objects()
+    
+            self.precompute_embeddings(queries)
             
-            top_k_fact_indices, top_k_facts = self.rank_facts(query, query_fact_scores)
-
-            if not top_k_facts:
-                # Fallback to DPR if no facts are found
-                sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
-            else:
-                # Execute RL Beam Search
-                passage_info, query_emb_raw = self.run_rl_graph_search_rerank(query, top_k_facts)
+            retrieve_start_time = time.time()
+            retrieval_results = []
+            desc = "Retrieving with NaviRAG"
+    
+            for q_idx, query in tqdm(enumerate(queries), desc=desc, total=len(queries)):
+                    
+                query_fact_scores = self.get_fact_scores(query)
                 
-                # Ensure query embedding is a tensor on the correct device
-                if isinstance(query_emb_raw, np.ndarray):
-                    query_emb_tensor = torch.from_numpy(query_emb_raw).float().to(self.device)
-                else:
-                    query_emb_tensor = query_emb_raw.to(self.device)                
-
-                if not passage_info:
-                    logger.warning("RL Search found no passages, falling back to DPR.")
+                top_k_fact_indices, top_k_facts = self.rank_facts(query, query_fact_scores)
+    
+                if not top_k_facts:
+                    # Fallback to DPR if no facts are found
                     sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
                 else:
-                    # 'rl_rerank' Logic: Combine Policy Score + Cosine Similarity + PPR Score
+                    # Execute RL Beam Search
+                    passage_info, query_emb_raw = self.run_rl_graph_search_rerank(query, top_k_facts)
                     
-                    # 1. Get PPR Scores for the context
-                    _, ppr_scores_dict = self._get_ppr_inputs_and_scores(query, top_k_facts, top_k_fact_indices)
-                    
-                    final_scores = {}
-                    for passage, info in passage_info.items():
-                        path_score = info['score']
-                        passage_emb_tensor = self.get_embedding_for_node(passage)
-                        if passage_emb_tensor is None: continue
+                    # Ensure query embedding is a tensor on the correct device
+                    if isinstance(query_emb_raw, np.ndarray):
+                        query_emb_tensor = torch.from_numpy(query_emb_raw).float().to(self.device)
+                    else:
+                        query_emb_tensor = query_emb_raw.to(self.device)                
+    
+                    if not passage_info:
+                        logger.warning("RL Search found no passages, falling back to DPR.")
+                        sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
+                    else:
+                        # 'rl_rerank' Logic: Combine Policy Score + Cosine Similarity + PPR Score
                         
-                        # 2. Calculate Cosine Similarity
-                        similarity_score = F.cosine_similarity(
-                            query_emb_tensor.view(1, -1), 
-                            passage_emb_tensor.view(1, -1)
-                        ).item()
+                        # 1. Get PPR Scores for the context
+                        _, ppr_scores_dict = self._get_ppr_inputs_and_scores(query, top_k_facts, top_k_fact_indices)
                         
-                        # 3. Get PPR Score
-                        ppr_score = ppr_scores_dict.get(passage, 0.0)
-
-                        # 4. Weighted Sum
-                        final_scores[passage] = self.w_policy * path_score + self.w_sim * similarity_score + self.w_ppr * ppr_score
-
-                    # Sort passages by final score
-                    final_sorted_passages = sorted(final_scores, key=final_scores.get, reverse=True)
-                    passage_key_to_idx = {key: i for i, key in enumerate(self.passage_node_keys)}
-                    
-                    # Map back to internal IDs
-                    sorted_doc_ids = np.array([passage_key_to_idx[p] for p in final_sorted_passages if p in passage_key_to_idx])
-                    sorted_doc_scores = np.array([final_scores[p] for p in final_sorted_passages if p in passage_key_to_idx])
-
-            # Retrieve actual content based on sorted IDs
-            top_k_docs = [self.chunk_embedding_store.get_row(self.passage_node_keys[idx])["content"] for idx in sorted_doc_ids[:num_to_retrieve]]
-            retrieval_results.append(QuerySolution(question=query, docs=top_k_docs, doc_scores=sorted_doc_scores[:num_to_retrieve]))
-
-        all_retrieval_time = time.time() - retrieve_start_time
-        
-        if gold_docs is not None:
-            k_list = [1, 2, 5, 10, 20, 30, 50, 100, 150, 200]
-            overall_retrieval_result, _ = retrieval_recall_evaluator.calculate_metric_scores(gold_docs=gold_docs, retrieved_docs=[r.docs for r in retrieval_results], k_list=k_list)
+                        final_scores = {}
+                        for passage, info in passage_info.items():
+                            path_score = info['score']
+                            passage_emb_tensor = self.get_embedding_for_node(passage)
+                            if passage_emb_tensor is None: continue
+                            
+                            # 2. Calculate Cosine Similarity
+                            similarity_score = F.cosine_similarity(
+                                query_emb_tensor.view(1, -1), 
+                                passage_emb_tensor.view(1, -1)
+                            ).item()
+                            
+                            # 3. Get PPR Score
+                            ppr_score = ppr_scores_dict.get(passage, 0.0)
+    
+                            # 4. Weighted Sum
+                            final_scores[passage] = self.w_policy * path_score + self.w_sim * similarity_score + self.w_ppr * ppr_score
+    
+                        # Sort passages by final score
+                        final_sorted_passages = sorted(final_scores, key=final_scores.get, reverse=True)
+                        passage_key_to_idx = {key: i for i, key in enumerate(self.passage_node_keys)}
+                        
+                        # Map back to internal IDs
+                        sorted_doc_ids = np.array([passage_key_to_idx[p] for p in final_sorted_passages if p in passage_key_to_idx])
+                        sorted_doc_scores = np.array([final_scores[p] for p in final_sorted_passages if p in passage_key_to_idx])
+    
+                # Retrieve actual content based on sorted IDs
+                top_k_docs = [self.chunk_embedding_store.get_row(self.passage_node_keys[idx])["content"] for idx in sorted_doc_ids[:num_to_retrieve]]
+                retrieval_results.append(QuerySolution(question=query, docs=top_k_docs, doc_scores=sorted_doc_scores[:num_to_retrieve]))
+    
+            all_retrieval_time = time.time() - retrieve_start_time
             
-            logger.info(f"Total Retrieval Time: {all_retrieval_time:.2f}s")
-            logger.info(f"Evaluation results for retrieval: {overall_retrieval_result}")
-            return retrieval_results, overall_retrieval_result
-            
-        return retrieval_results
+            if gold_docs is not None:
+                k_list = [1, 2, 5, 10, 20, 30, 50, 100, 150, 200]
+                overall_retrieval_result, _ = retrieval_recall_evaluator.calculate_metric_scores(gold_docs=gold_docs, retrieved_docs=[r.docs for r in retrieval_results], k_list=k_list)
+                
+                logger.info(f"Total Retrieval Time: {all_retrieval_time:.2f}s")
+                logger.info(f"Evaluation results for retrieval: {overall_retrieval_result}")
+                return retrieval_results, overall_retrieval_result
+                
+            return retrieval_results
 
 
     def rag_qa(self, queries: List[Union[str, QuerySolution]], gold_docs: List[List[str]] = None, gold_answers: List[List[str]] = None):
@@ -1001,7 +999,7 @@ def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: L
                         for i, next_node in enumerate(valid_neighbor_names):
                             policy_score = dist.log_prob(torch.tensor(i).to(self.device)).item()
                             
-                            new_path_score = beam['score'] + w_policy * policy_score
+                            new_path_score = beam['score'] + policy_score
                             
                             new_path = beam['path'] + [next_node]
                             all_candidate_beams.append({'path': new_path, 'score': new_path_score})
@@ -1029,6 +1027,8 @@ def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: L
                 node_key = self.passage_node_keys[doc_id]
                 dpr_fallback[node_key] = {'score': float(score), 'path': []}
             return dpr_fallback, query_emb
+            
+        return passage_info, query_emb
 
     def rank_facts(self, query: str, query_fact_scores: np.ndarray) -> Tuple[List[int], List[Tuple], dict]:
         """
@@ -1037,7 +1037,7 @@ def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: L
         link_top_k: int = self.global_config.linking_top_k
         
         if len(query_fact_scores) == 0 or len(self.fact_node_keys) == 0:
-            logger.warning("No facts available for reranking. Returning empty lists.")
+            logger.warning("No facts available for ranking. Returning empty lists.")
             return [], [], {'facts_before_rank': [], 'facts_after_rank': []}
             
         try:
@@ -1057,7 +1057,7 @@ def retrieve(self, queries: List[str], num_to_retrieve: int = None, gold_docs: L
             
         except Exception as e:
             logger.error(f"Error in rank_facts: {str(e)}")
-            return [], [], {'facts_before_rank': [], 'facts_after_rank': [], 'error': str(e)}
+            return [], []
 
     def analyze_multihop_capability(self, test_set_path: str, dataset_name: str = "musique"):
         """
